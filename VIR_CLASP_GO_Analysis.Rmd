@@ -1,0 +1,200 @@
+---
+title: "VIR_CLASP_GO_Analysis"
+output: html_notebook
+---
+
+The goal of this notebook is to export files for GO analysis, then import GO terms, and plot them.
+
+
+  
+```{r}
+library(tidyverse)
+library(purrr)
+library(knitr)
+
+input_directory <- "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/Output/"
+output_directory <- "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/GO_graphs/"
+external_directory <- "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/Panther_files/"
+
+```
+
+
+##Export of GO files
+  - High confidence dataset
+  - Minus IFN only
+  - Plus IFN only
+  
+```{r}
+#export
+```
+
+
+##Analysis of curated virus-associated terms from high-confidence set
+
+```{r}
+#Read in file
+curated <- read_csv(paste(external_directory, "high_confidence_biol_curated.csv", sep = ""))
+
+#Remove (GO: #) from GO terms
+curated$`GO biological process complete` <- gsub("\\s*\\([^\\)]+\\)", "", curated$`GO biological process complete`)
+
+
+#To preserve grouping based on curated categories
+curated <- curated %>%
+  mutate(`GO type` = forcats::fct_inorder(factor(`GO biological process complete`))) %>%
+  select(- `GO biological process complete`) %>%
+  mutate(Category = factor(Category, levels = c("Viral Entry/Exit","Viral Replication","Immune Response")))
+
+#Plot
+
+ggplot(curated, aes(x = `GO type`, y = `high_conf.tsv (518)`, fill = Category)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(`GO type`, "(FDR = ",`high_conf.tsv (FDR)`, ")"), y = 0, hjust = 0), size = 2) +
+  coord_flip() +
+  scale_fill_brewer(palette = "Pastel2") +
+  theme_minimal() +
+  facet_wrap(~Category, ncol = 1, strip.position = "left", scales = "free_y") +
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        panel.spacing = unit(0, "lines"),
+        strip.background = element_blank(),
+        strip.placement = "outside",
+        strip.text.y = element_text(size = 12),
+        legend.position = "none")
+
+ggsave(filename = "curated_go.pdf", device = "pdf", path = output_directory)
+```
+
+##Full (non-curated) GO analysis of high confidence proteins
+
+```{r}
+high_conf_molec <- read_tsv(paste(external_directory, "high_confidence_molec.txt", sep = ""), skip = 10)
+high_conf_biol <- read_tsv(paste(external_directory, "high_confidence_biol.txt", sep = ""), skip = 10)
+
+colnames(high_conf_molec)[1] <- "GO type"
+colnames(high_conf_biol)[1] <- "GO type"
+
+high_conf_molec_top <- high_conf_molec %>%
+  top_n(n = -10, wt = `Client Text Box Input (FDR)`) %>%
+  mutate(`GO analysis` = "molecular function")
+
+high_conf_biol_top <- high_conf_biol %>%
+  top_n(n = -10, wt = `Client Text Box Input (FDR)`) %>%
+  mutate(`GO analysis` = "biological process")
+
+combined_go <- rbind(high_conf_molec_top, high_conf_biol_top) %>%
+  arrange(`GO analysis`) %>%
+  mutate(`GO type` = forcats::fct_inorder(factor(`GO type`)))
+
+combined_go$`GO type` <- gsub("\\s*\\([^\\)]+\\)", "", combined_go$`GO type`)
+
+combined_go <- combined_go %>%
+  mutate(`GO type` = forcats::fct_inorder(factor(`GO type`)))
+
+ggplot(combined_go, aes(x = `GO type`, y = `Client Text Box Input (518)`, fill = `GO analysis`)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() +
+  #scale_fill_brewer(palette = "Pastel1") +
+  geom_text(aes(label = `GO type`, y = 0, hjust = 0), size = 2.5) +
+  #facet_grid(cat~., scales = 'free_y', space = 'free', switch = "both") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        strip.text.y = element_text(size = 12),
+        legend.position = "none") +
+  labs(y = "Number of Proteins", x = "GO term", title = "GO analysis of VIR-CLASP High Confidence Proteins")
+
+ggsave(filename = "high_confidence_go.pdf", device = "pdf", path = output_directory)
+```
+
+##Analysis of minus only GO
+
+```{r}
+minus_molec <- read_tsv(paste(external_directory, "minus_only_molec.txt", sep = ""), skip = 10)
+minus_biol <- read_tsv(paste(external_directory, "minus_only_biol.txt", sep = ""), skip = 10)
+
+colnames(minus_molec)[1] <- "GO type"
+colnames(minus_biol)[1] <- "GO type"
+
+minus_molec_top <- minus_molec %>%
+  top_n(n = -10, wt = `Client Text Box Input (FDR)`) %>%
+  mutate(`GO analysis` = "molecular function")
+
+minus_biol_top <- minus_biol %>%
+  top_n(n = -10, wt = `Client Text Box Input (FDR)`) %>%
+  mutate(`GO analysis` = "biological process")
+
+combined_go <- rbind(minus_molec_top, minus_biol_top) %>%
+  arrange(`GO analysis`) %>%
+  mutate(`GO type` = forcats::fct_inorder(factor(`GO type`)))
+
+combined_go$`GO type` <- gsub("\\s*\\([^\\)]+\\)", "", combined_go$`GO type`)
+
+combined_go <- combined_go %>%
+  mutate(`GO type` = forcats::fct_inorder(factor(`GO type`)))
+
+ggplot(combined_go, aes(x = `GO type`, y = `Client Text Box Input (26)`, fill = `GO analysis`)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() +
+  #scale_fill_brewer(palette = "Pastel1") +
+  geom_text(aes(label = `GO type`, y = 0, hjust = 0), size = 2.5) +
+  #facet_grid(cat~., scales = 'free_y', space = 'free', switch = "both") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        strip.text.y = element_text(size = 12),
+        legend.position = "none") +
+  labs(y = "Number of Proteins", x = "GO term", title = "GO analysis of VIR-CLASP Minus IFN only")
+
+ggsave(filename = "minus_only_go.pdf", device = "pdf", path = output_directory)
+```
+
+##Analysis of plus only GO
+
+```{r}
+plus_molec <- read_tsv(paste(external_directory, "plus_only_molec.txt", sep = ""), skip = 10)
+plus_biol <- read_tsv(paste(external_directory, "plus_only_biol.txt", sep = ""), skip = 10)
+
+colnames(plus_molec)[1] <- "GO type"
+colnames(plus_biol)[1] <- "GO type"
+
+plus_molec_top <- plus_molec %>%
+  top_n(n = -10, wt = `Client Text Box Input (FDR)`) %>%
+  mutate(`GO analysis` = "molecular function")
+
+plus_biol_top <- plus_biol %>%
+  top_n(n = -10, wt = `Client Text Box Input (FDR)`) %>%
+  mutate(`GO analysis` = "biological process")
+
+combined_go <- rbind(plus_molec_top, plus_biol_top) %>%
+  arrange(`GO analysis`) %>%
+  mutate(`GO type` = forcats::fct_inorder(factor(`GO type`)))
+
+combined_go$`GO type` <- gsub("\\s*\\([^\\)]+\\)", "", combined_go$`GO type`)
+
+combined_go <- combined_go %>%
+  mutate(`GO type` = forcats::fct_inorder(factor(`GO type`)))
+
+ggplot(combined_go, aes(x = `GO type`, y = `Client Text Box Input (34)`, fill = `GO analysis`)) +
+  geom_bar(stat = 'identity') +
+  coord_flip() +
+  #scale_fill_brewer(palette = "Pastel1") +
+  geom_text(aes(label = `GO type`, y = 0, hjust = 0), size = 2.5) +
+  #facet_grid(cat~., scales = 'free_y', space = 'free', switch = "both") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(size = 12),
+        axis.text.y = element_blank(),
+        axis.title.y = element_blank(),
+        panel.grid.major.y = element_blank(),
+        strip.text.y = element_text(size = 12),
+        legend.position = "none") +
+  labs(y = "Number of Proteins", x = "GO term", title = "GO analysis of VIR-CLASP plus IFN only")
+
+ggsave(filename = "plus_only_go.pdf", device = "pdf", path = output_directory)
+```

@@ -1,0 +1,459 @@
+---
+title: "VIR-CLASP Protein Filtering"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+The goal of this R Notebook is to take output protein lists from IDPicker in tsv format, and create final protein lists of high and medium confidence hits from the CHIKV VIR-CLASP experiment. Analysis of the CLASP only data occurs in a separate document. Statistical/GO analysis occurs in a separate document. The final output files are listed below:
+  - all_proteins.csv
+  - all_virclasp.csv
+  - high_confidence_vir_clasp.csv
+  - medium_confidence_vir_clasp.csv
+  - no4SU.csv
+
+```{r}
+library(tidyverse)
+library(purrr)
+library(knitr)
+library(scaffoldProteomics)
+library(reshape2)
+
+input_directory = "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/IDPicker_Output_tsv/"
+output_directory = "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/Output/"
+
+```
+
+```{r}
+#Function Definitions
+read_files <- function(file_name, path_) {
+  temp <- read_tsv(paste(path_,file_name, sep = ""), progress = FALSE) %>%
+    select("Accession", "Description", "Filtered Spectra", "Distinct Peptides", "Coverage") %>%
+    mutate(source = str_replace(file_name, "\\.tsv", ""))
+}
+
+clean_names <- function(input_names) {
+  id <- gsub("\\w*_HUMAN","",input_names)
+  id <- gsub("gi\\|\\w*,", "", id)
+  id <- gsub("r-tr\\|\\w*\\|,", "", id)
+  id <- gsub("tr\\|\\w*\\|,", "", id)
+  id <- gsub(",tr\\|\\w*\\|", "", id)
+  id <- gsub(",r-tr\\|\\w*\\|", "", id)
+  id <- gsub(",sp\\|\\w*\\|", "", id)
+  id <- gsub("r-sp\\|", "", id)
+  id <- gsub("sp\\|", "", id)
+  id <- gsub("r-tr\\|", "", id)
+  id <- gsub("tr\\|", "", id)
+  id <- gsub("\\|", "", id)
+  id <- data_frame(Proteins = id)
+  #return
+  colnames(id) <- " "
+  id
+}
+```
+
+
+
+
+###First, read in the files, and make the "source" names refer to the appropriate condition/replicate, and add condition variable
+```{r message = FALSE, echo = FALSE}
+
+input <- list.files(path = input_directory, pattern = "\\.tsv")
+
+all_data <- map_df(input, read_files, path_ = input_directory)
+
+print(unique(all_data$source))
+
+all_data$source[all_data$source == "idp_101917_1"] <- "clasp_minus_rep1"
+all_data$source[all_data$source == "idp_101917_2"] <- "clasp_plus_rep1"
+all_data$source[all_data$source == "idp_101917_3"] <- "clasp_minus_rep2"
+all_data$source[all_data$source == "idp_101917_4"] <- "clasp_plus_rep2"
+all_data$source[all_data$source == "idp_101917_5"] <- "hour0_minus_rep1"
+all_data$source[all_data$source == "idp_101917_6"] <- "hour1_minus_rep1"
+all_data$source[all_data$source == "idp_101917_7"] <- "hour3_minus_rep1"
+all_data$source[all_data$source == "idp_101917_8"] <- "hour0_plus_rep1"
+all_data$source[all_data$source == "idp_101917_9"] <- "hour1_plus_rep1"
+all_data$source[all_data$source == "idp_101917_10"] <- "hour3_plus_rep1"
+all_data$source[all_data$source == "idp_101917_11"] <- "hour0_minus_rep2"
+all_data$source[all_data$source == "idp_101917_12"] <- "hour1_minus_rep2"
+all_data$source[all_data$source == "idp_101917_13"] <- "hour3_minus_rep2"
+all_data$source[all_data$source == "idp_101917_14"] <- "hour0_plus_rep2"
+all_data$source[all_data$source == "idp_101917_15"] <- "hour1_plus_rep2"
+all_data$source[all_data$source == "idp_101917_16"] <- "hour3_plus_rep2"
+all_data$source[all_data$source == "idp_121917_1"] <- "hour0_minus_rep4"
+all_data$source[all_data$source == "idp_121917_2"] <- "hour1_minus_rep4"
+all_data$source[all_data$source == "idp_121917_3"] <- "hour3_minus_rep4"
+all_data$source[all_data$source == "idp_121917_4"] <- "hour0_plus_rep4"
+all_data$source[all_data$source == "idp_121917_5"] <- "hour1_plus_rep4"
+all_data$source[all_data$source == "idp_121917_6"] <- "hour3_plus_rep4"
+all_data$source[all_data$source == "idp_121917_7"] <- "no4SU_minus_rep1"
+all_data$source[all_data$source == "idp_121917_8"] <- "no4SU_plus_rep1"
+all_data$source[all_data$source == "idp_121917_9"] <- "no4SU_minus_rep2"
+all_data$source[all_data$source == "idp_121917_10"] <- "no4SU_plus_rep2"
+all_data$source[all_data$source == "4701_MA_011417_1"] <- "no4SU_minus_rep3"
+all_data$source[all_data$source == "4701_MA_011417_2"] <- "no4SU_plus_rep3"
+
+all_data <- mutate(all_data, condition = gsub("_rep[0-9]", "", source))
+
+print(unique(all_data$source))
+```
+
+##Cleaning
+ - Filter for proteins with >= 2 Distinct Peptides
+ - Filter for proteins with >= 20% Protein Coverage
+ - Filter out decoys
+ - Remove `Distinct Peptides` and Coverage columns
+ 
+```{r}
+clean_data <- all_data %>%
+  filter(!grepl("XXX", Accession)) %>%
+  filter(`Distinct Peptides` >= 2 & Coverage > 20.0) %>%
+  select(-`Distinct Peptides`, -Coverage)
+
+length(unique(clean_data$Accession))
+```
+ 
+##Extract Spectral Counts for Benzonase
+
+```{r}
+benzo_data <- all_data %>%
+  filter(grepl("SERMA", Accession)) %>%
+  arrange(`Filtered Spectra`) %>%
+  select(- Description)
+
+kable(benzo_data, caption = "Benzonase Spectral Counts")
+
+benzo_summary <- benzo_data %>%
+  summarize(ave_count = mean(`Filtered Spectra`), SD_count = sd(`Filtered Spectra`))
+
+kable(benzo_summary, caption = "Benzonase Summary")
+
+benzo_norm_factors <- benzo_data %>%
+  mutate(norm_factor = `Filtered Spectra`[benzo_data$source == "no4SU_plus_rep3"] / `Filtered Spectra`) %>%
+  select(-condition, -`Filtered Spectra`, -Accession)
+
+kable(benzo_norm_factors, caption = "Benzonase Normalization Factors")
+
+```
+
+##Normalize VIR-CLASP Spectral Counts
+ - Filter for > 2 normalized spectra
+
+```{r}
+clean_data_norm <- clean_data %>%
+  full_join_NA(benzo_norm_factors, by = "source") %>%
+  mutate(norm_spectra = round(`Filtered Spectra` * norm_factor)) %>%
+  filter(norm_spectra > 2) %>%
+  mutate(long_Accession = Accession,
+         Accession = pull(clean_names(Accession), 1))
+
+length(unique(clean_data_norm$Accession))
+```
+
+##Output the cleaned, normalized proteins to all_proteins.csv
+
+```{r}
+clean_data_norm %>%
+  write_csv(path = paste(output_directory, "all_proteins.csv", sep = ""))
+```
+
+##Input the mapped Uniprot Gene names, and append to clean_data_norm
+
+```{r}
+clean_data_norm_named <- read_tsv(paste(output_directory, "uniprot_genename.txt", sep = "")) %>%
+  group_by(From) %>%
+  summarize(Name = paste(To, collapse = ",")) %>%
+  mutate(Accession = From) %>%
+  select(-From) %>%
+  full_join_NA(clean_data_norm, by = "Accession") %>%
+  #select(Accession, Name, Description, long_Accession) %>%
+  mutate(Name = case_when(
+    Name == 0 ~ long_Accession,
+    TRUE ~ Name
+  )) %>%
+  select(-long_Accession)
+
+clean_data_norm_named$Name <- gsub(pattern = "sp\\|[^\\|]+\\|", clean_data_norm_named$Name, replacement = "")
+clean_data_norm_named$Name <- gsub(pattern = "_HUMAN", clean_data_norm_named$Name, replacement = "")
+```
+##Output the new named protein list
+```{r}
+clean_data_norm_named %>% write_csv(path = paste(output_directory, "all_proteins_named.csv", sep = ""))
+```
+
+
+##Define set of -4SU proteins
+  - Remove replicate 1 (Only use replicate 2 and 3)
+  - Present in both replicates
+
+```{r}
+no4SU <- clean_data_norm_named %>%
+  filter(grepl("no4SU", condition)& !grepl("rep1", source)) %>%
+  group_by(condition, Accession) %>%
+  mutate(exists = sum(norm_spectra > 0), ave_spectra = round(mean(norm_spectra))) %>%
+  filter(exists == 2) %>%
+  select(c("Accession", "ave_spectra", "source", "condition", "Name"))
+
+length(unique(no4SU$Accession))
+```
+
+##Output the no4SU proteins to no4SU.csv
+
+```{r}
+write_csv(no4SU, path = paste(output_directory, "no4SU.csv", sep = ""))
+```
+
+
+##Define set of VIR-CLASP proteins in 2/3 replicates in at least 1 condition
+  - Remove CLASP proteins
+  - Calculate average spectral counts across the replicates
+
+
+```{r}
+
+vir_clasp <- clean_data_norm_named %>%
+  filter(grepl("hour", source)) %>%
+  group_by(condition, Accession) %>%
+  summarize(exists = sum(norm_spectra > 0), ave_spectra = round(mean(norm_spectra)), Description = unique(Description), Name = unique(Name)) %>%
+  filter(exists >= 2)
+
+length(unique(vir_clasp$Accession))
+```
+
+##Output the vir-clasp proteins to all_virclasp.csv
+```{r}
+write_csv(vir_clasp, path = paste(output_directory, "all_virclasp.csv", sep = ""))
+```
+
+
+##Define the high-confidence set of vir-clasp proteins
+  - First separate by IFN, to compare to appropriate -4SU condition
+  - Then combine to make full data set
+
+```{r}
+no4SU_minus <- no4SU %>%
+  filter(condition == "no4SU_minus") %>%
+  ungroup() %>%
+  select(Accession, ave_spectra)
+
+no4SU_plus <- no4SU %>%
+  filter(condition == "no4SU_plus") %>%
+  ungroup() %>%
+  select(Accession, ave_spectra)
+
+high_conf_minus <- vir_clasp %>%
+  filter(grepl("minus", condition)) %>%
+  filter(!(Accession %in% no4SU_minus$Accession))
+
+high_conf_plus <- vir_clasp %>%
+  filter(grepl("plus", condition)) %>%
+  filter(!(Accession %in% no4SU_plus$Accession))
+
+high_confidence_vir_clasp <- rbind(high_conf_minus, high_conf_plus) %>%
+  select(-exists)
+
+length(unique(high_confidence_vir_clasp$Accession))
+
+```
+
+##Output the combined +/-IFN high confidence proteins to high_confidence_vir_clasp.csv
+
+```{r}
+write_csv(high_confidence_vir_clasp, path = paste(output_directory, "high_confidence_vir_clasp.csv", sep = ""))
+
+#In Supplementary Table form
+
+high_confidence_vir_clasp_sup <- high_confidence_vir_clasp %>%
+  mutate(exists = "X") %>%
+  select(-ave_spectra) %>%
+  spread(condition, exists, fill = "")
+
+high_confidence_vir_clasp_sup$Name <- gsub(pattern = "SEPT", high_confidence_vir_clasp_sup$Name, replacement = "_SEPT")
+n_distinct(high_confidence_vir_clasp_sup$Accession)
+
+write_csv(high_confidence_vir_clasp_sup, path = paste(output_directory, "Sup_Table_high_confidence.csv", sep = ""))
+
+```
+
+##Define the medium-confidence set of vir-clasp proteins
+  - Does not contain the high-confidence proteins
+
+```{r}
+med_conf_minus <- vir_clasp %>%
+  filter(grepl("minus", condition)) %>%
+  full_join_NA(no4SU_minus, by = "Accession") %>%
+  mutate(fold_change = case_when(
+    ave_spectra.y > 0 ~ round(ave_spectra.x / ave_spectra.y),
+    ave_spectra.y == 0 ~ ave_spectra.x + 5
+  )) %>%
+  filter(fold_change > 5)
+
+med_conf_plus <- vir_clasp %>%
+  filter(grepl("plus", condition)) %>%
+  full_join_NA(no4SU_plus, by = "Accession") %>%
+  mutate(fold_change = case_when(
+    ave_spectra.y > 0 ~ round(ave_spectra.x / ave_spectra.y),
+    ave_spectra.y == 0 ~ ave_spectra.x + 5
+  )) %>%
+  filter(fold_change > 5)
+
+medium_confidence_vir_clasp <- rbind(unique(med_conf_plus), unique(med_conf_minus)) %>%
+  filter(!(Accession %in% high_confidence_vir_clasp$Accession)) %>%
+  select(Accession, condition, ave_spectra = ave_spectra.x, Description, Name)
+
+length(unique(medium_confidence_vir_clasp$Accession))
+```
+
+##Output the combined +/- IFN medium confidence proteins to medium_confidence_vir_clasp.csv
+
+```{r}
+write_csv(medium_confidence_vir_clasp, path = paste(output_directory, "medium_confidence_vir_clasp.csv", sep = ""))
+
+#In Supplementary Table form
+
+med_confidence_vir_clasp_sup <- medium_confidence_vir_clasp %>%
+  mutate(exists = "X") %>%
+  select(-ave_spectra) %>%
+  spread(condition, exists, fill = "")
+med_confidence_vir_clasp_sup$Name <- gsub(pattern = "SEPT", med_confidence_vir_clasp_sup$Name, replacement = "_SEPT")
+n_distinct(med_confidence_vir_clasp_sup$Accession)
+
+write_csv(med_confidence_vir_clasp_sup, path = paste(output_directory, "Sup_Table_medium_confidence.csv", sep = ""))
+```
+##Create combined Supplementary Table of high and medium confidence
+
+```{r}
+high_for_combined <- high_confidence_vir_clasp_sup %>%
+  mutate(Confidence = "High")
+
+med_for_combined <- med_confidence_vir_clasp_sup %>%
+  mutate(Confidence = "Medium")
+
+combined_sup <- high_for_combined %>%
+  bind_rows(med_for_combined) 
+
+write_csv(combined_sup, "Final Excels/Combined_Supplementary_Table_080418.csv")
+```
+
+##Correlations between replicates
+
+
+```{r}
+
+clean_data_norm_wide <- clean_data_norm %>%
+  filter(!(source %in% c("no4SU_minus_rep1", "no4SU_plus_rep1")) &
+         !(grepl("clasp", source))) %>%
+  #add ordering variables
+  mutate(rep = case_when(
+           condition == "no4SU_minus" ~ 0,
+           condition == "no4SU_plus"  ~ 0,
+           TRUE ~ as.numeric(gsub(".*_rep", "", source))),
+         hour = case_when(
+           condition == "no4SU_minus" ~ rep,
+           condition == "no4SU_plus"  ~ rep,
+           TRUE ~ as.numeric(gsub("hour([0-9])_.*","\\1", source)))) %>%
+  #order the data
+  arrange(rep, hour) %>%
+  #get rid of things that would screw with the spreading
+  select(Accession, source, norm_spectra) %>%
+  #maintain the order
+  mutate(source = forcats::fct_inorder(factor(source))) %>%
+  #spread
+  spread(source, norm_spectra, fill = 0) %>%
+  #Accession variable confuses the cor fxns
+  select(-Accession)
+
+colnames(clean_data_norm_wide) <- gsub("_", " ", colnames(clean_data_norm_wide))
+colnames(clean_data_norm_wide) <- gsub("plus", "+IFN", colnames(clean_data_norm_wide))
+colnames(clean_data_norm_wide) <- gsub("minus", "-IFN", colnames(clean_data_norm_wide))
+
+plus <- clean_data_norm_wide %>%
+  select(contains("+IFN"))
+
+minus <- clean_data_norm_wide %>%
+  select(contains("-IFN"))
+
+cor_plus <- round(cor(plus, method = "spearman"), 5)
+cor_minus <- round(cor(minus, method = "spearman"), 5)
+
+cor_plus[lower.tri(cor_plus)] <- NA
+cor_minus[lower.tri(cor_minus)] <- NA
+
+melted_cor_plus_upper <- melt(cor_plus, na.rm = TRUE)
+melted_cor_minus_upper <- melt(cor_minus, na.rm = TRUE)
+
+ggplot(melted_cor_plus_upper, aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", 
+   midpoint = 0.5, limit = c(0,1), space = "Lab", 
+   name="Spearman\nCorrelation") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+   size = 10, hjust = 1), text = element_text(family = "Helvetica"))+
+  coord_fixed() +
+  # geom_text(aes(Var2, Var1, label = value), color = "black", size = 3, family = "Helvetica") +
+  theme(axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.grid.major = element_blank(),
+  panel.border = element_blank(),
+  panel.background = element_blank(),
+  axis.ticks = element_blank(),
+  legend.justification = c(1, 0),
+  legend.position = c(0.6, 0.7),
+  legend.direction = "horizontal") +
+  guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                title.position = "top", title.hjust = 0.5))
+
+ggsave(paste(output_directory,"plus_heatmap.pdf", sep = ""), width = 15, height = 15)
+
+ggplot(melted_cor_minus_upper, aes(x = Var2, y = Var1, fill = value)) +
+  geom_tile(color = "white")+
+  scale_fill_gradient2(low = "blue", high = "red", 
+   midpoint = 0.5, limit = c(0,1), space = "Lab", 
+   name="Spearman\nCorrelation") +
+  theme_minimal()+ 
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, 
+    size = 10, hjust = 1), text = element_text(family = "Helvetica"))+
+  coord_fixed() +
+  # geom_text(aes(Var2, Var1, label = value), color = "black", size = 3, family = "Helvetica") +
+  theme(axis.title.x = element_blank(),
+  axis.title.y = element_blank(),
+  panel.grid.major = element_blank(),
+  panel.border = element_blank(),
+  panel.background = element_blank(),
+  axis.ticks = element_blank(),
+  legend.justification = c(1, 0),
+  legend.position = c(0.6, 0.7),
+  legend.direction = "horizontal") +
+  guides(fill = guide_colorbar(barwidth = 7, barheight = 1,
+                title.position = "top", title.hjust = 0.5))
+
+ggsave(paste(output_directory,"minus_heatmap.pdf", sep = ""), width = 15, height = 15)
+```
+
+
+##Get proteins unique to certain datasets
+
+```{r}
+early_proteins_med <- medium_confidence_vir_clasp %>%
+  group_by(Accession) %>%
+  mutate(combined = paste(condition, collapse = ",")) %>%
+  filter(combined %in% c("hour0_plus,hour0_minus", "hour0_plus", "hour0_minus", "hour0_minus,hour0_plus")) %>%
+  mutate(Set = "Medium-Confidence")
+
+early_proteins_high <- high_confidence_vir_clasp %>%
+  group_by(Accession) %>%
+  mutate(combined = paste(condition, collapse = ",")) %>%
+  filter(combined %in% c("hour0_plus,hour0_minus", "hour0_plus", "hour0_minus", "hour0_minus,hour0_plus")) %>%
+  mutate(Set = "High-Confidence")
+
+early_proteins <- rbind(early_proteins_med, early_proteins_high) %>%
+  select(-combined, -ave_spectra, -Description) %>%
+  mutate(exists = "X") %>%
+  spread(condition, exists, fill = "")
+  
+write_csv(early_proteins, path = paste(output_directory, "proteins_unique_0.2hr.csv", sep = ""))
+```
+

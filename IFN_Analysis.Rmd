@@ -1,0 +1,86 @@
+---
+title: "IFN Analysis"
+output: html_notebook
+---
+
+Analysis of the proportion of ISGs in each condition.
+
+Export condition files (Uniprot ID), then run each through Interferome (interferome.org)
+
+
+
+```{r}
+library(tidyverse)
+library(purrr)
+library(knitr)
+library(scaffoldProteomics)
+
+input_directory <- "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/Output/"
+output_directory <- "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/Conditions/"
+
+#Function Definitions
+
+clean_names <- function(input_names) {
+  id <- gsub("\\w*_HUMAN","",input_names)
+  id <- gsub("gi\\|\\w*,", "", id)
+  id <- gsub("r-tr\\|\\w*\\|,", "", id)
+  id <- gsub("tr\\|\\w*\\|,", "", id)
+  id <- gsub(",tr\\|\\w*\\|", "", id)
+  id <- gsub(",r-tr\\|\\w*\\|", "", id)
+  id <- gsub(",sp\\|\\w*\\|", "", id)
+  id <- gsub("r-sp\\|", "", id)
+  id <- gsub("sp\\|", "", id)
+  id <- gsub("r-tr\\|", "", id)
+  id <- gsub("tr\\|", "", id)
+  id <- gsub("\\|", "", id)
+  id <- data_frame(Proteins = id)
+  #return
+  colnames(id) <- " "
+  id
+}
+
+```
+
+
+```{r}
+high_confidence <- read_csv(paste(input_directory, "high_confidence_vir_clasp.csv", sep = "")) %>%
+  select(-ave_spectra)
+            
+high_confidence_id_mapping <- read_csv(paste(input_directory, "high_confidence_uniprot_ensembl.csv", sep = ""))
+
+interferome_genes <- read_csv(paste(input_directory, "interferome_genes.csv", sep = ""), skip = 19)
+
+high_confidence_interferome <- high_confidence_id_mapping %>%
+  filter(Ensembl %in% interferome_genes$`Ensembl Id`) %>%
+  mutate(Accession = Uniprot, IFN = "X") %>%
+  select(-Uniprot, -Ensembl) %>%
+  unique() %>%
+  full_join_NA(high_confidence, by = "Accession") %>%
+  mutate(exists = "X") %>%
+  select(Accession, Description, Name, IFN, condition, exists) %>%
+  spread(condition, exists, fill = " ") %>%
+  mutate(IFN = case_when(
+    IFN == 0 ~ " ",
+    TRUE ~ "X"
+  ))
+#test <- filter(high_confidence_interferome, IFN == "X")
+#test2 <- filter(high_confidence_interferome, !(IFN == "X"))
+write_csv(high_confidence_interferome, paste(output_directory, "Sup_Table_ISGs.csv", sep = ""))
+```
+
+#Input proportions and graph
+
+```{r}
+isgs <- read_csv(paste(output_directory, "isg_proportions.csv", sep = ""))
+isgs$grp <- paste(isgs$IFN, isgs$Condition)
+
+
+ggplot(isgs, aes(x = Time, y = Proportion_ISGs, group = grp, color = IFN)) +
+  geom_line() +
+  geom_point()
+
+```
+
+
+
+

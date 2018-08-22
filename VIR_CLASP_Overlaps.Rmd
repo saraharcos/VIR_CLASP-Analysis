@@ -1,0 +1,339 @@
+---
+title: "VIR-CLASP Overlaps"
+output: html_notebook
+---
+
+The goal of this R Notebook is to determine the proteins that are shared and distinct between the different conditions of VIR-CLASP
+
+#The secondary goal is to determine the proteins that are shared and distinct between these external datasets:
+  - The set of Interferon Stimulated Genes (ISGs) which can be found in (filename)
+  - The set of hits from the CHIKV siRNA screen which can be found in (filename)
+  - The set of RNA binding proteins which can be found in (Gerstberger_2014_tableS3.csv)
+
+#The files used will be the output of the VIR_CLASP_Protein_Filtering Notebook
+  - all_proteins.csv
+  - high_confidence_vir_clasp.csv
+  - medium_confidence_vir_clasp.csv
+  
+```{r}
+library(venneuler)
+library(tidyverse)
+library(purrr)
+library(knitr)
+
+input_directory <- "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/Output/"
+output_directory <- "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/Overlaps/"
+external_directory <- "/Users/saraharcos/Desktop/VIR_CLASP_Analysis/External_Data/"
+
+```
+
+```{r}
+#Function Definitions
+
+clean_names <- function(input_names) {
+  id <- gsub("\\w*_HUMAN","",input_names)
+  id <- gsub("gi\\|\\w*,", "", id)
+  id <- gsub("r-tr\\|\\w*\\|,", "", id)
+  id <- gsub("tr\\|\\w*\\|,", "", id)
+  id <- gsub(",tr\\|\\w*\\|", "", id)
+  id <- gsub(",r-tr\\|\\w*\\|", "", id)
+  id <- gsub(",sp\\|\\w*\\|", "", id)
+  id <- gsub("r-sp\\|", "", id)
+  id <- gsub("sp\\|", "", id)
+  id <- gsub("r-tr\\|", "", id)
+  id <- gsub("tr\\|", "", id)
+  id <- gsub("\\|", "", id)
+  id <- data_frame(Proteins = id)
+  #return
+  colnames(id) <- " "
+  id
+}
+```
+
+
+##Read in files
+```{r message = FALSE}
+vir_clasp <- read_csv(paste(input_directory, "all_virclasp.csv", sep = ""))
+high_confidence_vir_clasp <- read_csv(paste(input_directory, "high_confidence_vir_clasp.csv", sep = ""))
+medium_confidence_vir_clasp <- read_csv(paste(input_directory, "medium_confidence_vir_clasp.csv", sep = ""))
+no4SU <- read_csv(paste(input_directory, "no4SU.csv", sep = ""))
+
+
+```
+
+
+##Overlap between -4SU and +4SU samples
+```{r}
+library(venneuler)
+vir_clasp_minus <- vir_clasp %>%
+  filter(grepl("minus", condition))
+
+no4SU_minus <- no4SU %>%
+  filter(grepl("minus", condition))
+
+high_conf_minus <- high_confidence_vir_clasp %>%
+  filter(grepl("minus", condition))
+
+n_virclasp_minus <- n_distinct(vir_clasp_minus$Accession)
+
+n_high_conf_minus <- n_distinct(high_conf_minus$Accession)
+n_no4SU_minus <- n_distinct(no4SU_minus$Accession)
+
+overlap_minus <- venneuler(c("VIRCLASP" = n_high_conf_minus, 
+                            "-4SU" = (n_no4SU_minus - (n_virclasp_minus - n_high_conf_minus)), 
+                            "VIRCLASP&-4SU" = (n_virclasp_minus - n_high_conf_minus)))
+pdf(paste(output_directory, 'overlap_no4SU_minus.pdf', sep = ""))
+plot(overlap_minus)
+dev.off()
+
+vir_clasp_plus <- vir_clasp %>%
+  filter(grepl("plus", condition))
+
+no4SU_plus <- no4SU %>%
+  filter(grepl("plus", condition))
+
+high_conf_plus <- high_confidence_vir_clasp %>%
+  filter(grepl("plus", condition))
+
+n_virclasp_plus <- n_distinct(vir_clasp_plus$Accession)
+n_high_conf_plus <- n_distinct(high_conf_plus$Accession)
+n_no4SU_plus <- n_distinct(no4SU_plus$Accession)
+
+overlap_plus <- venneuler(c("VIRCLASP" = n_high_conf_plus, 
+                            "-4SU" = (n_no4SU_plus - (n_virclasp_plus - n_high_conf_plus)), 
+                            "VIRCLASP&-4SU" = (n_virclasp_plus - n_high_conf_plus)))
+pdf(paste(output_directory, 'overlap_no4SU_plus.pdf', sep = ""))
+plot(overlap_plus)
+dev.off()
+```
+
+##Overlap between VIR-CLASP conditions
+
+```{r}
+library(UpSetR)
+
+upset_frame <- high_confidence_vir_clasp %>%
+  select(condition, Accession, Name, Description) %>%
+  mutate(exists = 1) %>%
+  group_by(Accession) %>%
+  spread(condition, exists, fill = 0)
+
+minus_IFN <- upset_frame %>%
+  filter(hour0_minus == 0 &
+         hour1_minus == 0 &
+         hour3_minus == 0 &
+         hour0_plus == 1 &
+         hour1_plus == 0 &
+         hour3_plus == 0)
+
+
+inputData <- as.data.frame(upset_frame)
+inputData$Accession <- as.factor(inputData$Accession)
+str(inputData)
+
+#write to csv for external use in UpSet
+write_delim(inputData, paste(output_directory, "CHIKV_UpSet.csv", sep = ""), delim = ";")
+
+#pass as vector
+upset_fxn <- function(datasets){
+ upset(inputData, nsets = 6, 
+      order.by = c("freq"), 
+      sets = datasets,
+      queries = list(list(query = intersects, params = list("hour0_plus", "hour1_plus", "hour3_plus"),
+                          color = "#FEB938", active = T),
+                     list(query = intersects, params = list("hour0_minus", "hour1_minus", "hour3_minus"),
+                          color = "blue", active = T)),
+      keep.order = TRUE,
+      #group.by = "sets",
+      cutoff = 3,
+      empty.intersections = "on",
+      text.scale = .8,
+      sets.bar.color = "#56B4E9",
+      mainbar.y.label = "Protein Intersections",
+      sets.x.label = "Proteins Per Condition",
+      line.size = 0.5,
+      point.size = 1,
+      mb.ratio = c(0.65, 0.35))
+}
+pdf(paste(output_directory, 'VIR_CLASP_UpSet.pdf', sep = ""), width = 6, height = 2)
+upset_fxn(c("hour0_minus", "hour1_minus", "hour3_minus", "hour0_plus", "hour1_plus", "hour3_plus"))
+dev.off()
+
+#ggsave(path = output_directory, filename = "VIR_CLASP_UpSet.pdf", plot = r, device = "pdf", height = 5, width = 5)
+
+
+```
+
+##Gerstberger RBP list
+  - Need to tranlate the Uniprot ID's from the VIR-CLASP data to Ensembl Protein ID's
+  - See rtf in "External Data" folder for explanation of Gerstberger dataset
+
+```{r}
+gerstberger <- read_csv(paste(external_directory, "Gerstberger_Uniprot.csv", sep = "")) %>%
+  filter(Status == "reviewed") %>%
+  select("Accession" = Entry)
+n_distinct(gerstberger$Accession)
+```
+
+##GO RNA-binding annotations
+  -Retrieved from geneontology.org on 05/03/18
+
+```{r}
+go_rbp <- read_tsv(paste(external_directory,"RNA_binding_GO_050318.txt", sep = ""), col_names = c("Accession", "Name"))
+go_rbp$Accession <- gsub(pattern = "UniProtKB\\:", go_rbp$Accession, replacement = "")
+go_rbp$Name = NULL
+n_distinct(go_rbp$Accession)
+
+```
+
+## Castello Interactome
+  - Same protocol as Gerstberger, Ensembl ID's were converted to current version, then converted to Uniprot ID`s for comparison
+```{r}
+castello <- read_csv(paste(external_directory, "HeLaInteractome_uniprot.csv", sep = ""), col_names = "Accession")
+n_distinct(castello$Accession)
+
+```
+
+## Baltz Interactome
+
+```{r}
+baltz <- read_csv(paste(external_directory, "Baltz_uniprot.csv", sep = "")) %>%
+  select(Accession = Entry)
+```
+
+
+##Comparisons between Vir-CLASP High Confidence, GO Annotated RBP's, Gerstberger RBP's, Castello RBP's, and Baltz RBP's
+
+```{r}
+#Get Cleaned Uniprot Accessions of VIR-CLASP data
+n_distinct(high_confidence_vir_clasp$Accession)
+
+high_confidence_vir_clasp_annotated <- high_confidence_vir_clasp %>%
+  filter(Accession %in% go_rbp$Accession |
+         Accession %in% gerstberger$Accession |
+         Accession %in% castello$Accession |
+         Accession %in% baltz$Accession)
+n_distinct(high_confidence_vir_clasp_annotated$Accession)
+
+vir_only <- filter(high_confidence_vir_clasp, !(Accession %in% go_rbp$Accession) &
+                                                    !(Accession %in% gerstberger$Accession) &
+                                                    !(Accession %in% castello$Accession &
+                                                    !(Accession %in% baltz$Accession)))
+n_distinct(vir_only$Accession)
+#Make Table of overlaps
+
+gerstberger2 <- mutate(gerstberger, Gerstberger2014 = "X")
+go_rbp2 <- mutate(go_rbp, `GO: RNA-binding` = "X")
+castello2 <- mutate(castello, Castello2012 = "X")
+baltz2 <- mutate(baltz, Baltz2012 = "X")
+annotated_rbps <- high_confidence_vir_clasp_annotated %>%
+  select(-condition, -ave_spectra) %>%
+  unique() %>%
+  full_join_NA(gerstberger2, by = "Accession") %>%
+  full_join_NA(castello2, by = "Accession") %>%
+  full_join_NA(go_rbp2, by = "Accession") %>%
+  full_join_NA(baltz2, by = "Accession") %>%
+  filter(Name != 0)
+
+write_csv(annotated_rbps, paste(output_directory, "Sup_Table_Annotated_RBPs.csv", sep = ""))
+
+```
+
+##siRNA Screen for CHIKV (Karlas et al 2016, Nature Communications)
+ - Use combined high and medium confidence vir-clasp sets
+
+```{r}
+n_distinct(medium_confidence_vir_clasp$Accession)
+
+
+all_confidence_vir_clasp <- rbind(high_confidence_vir_clasp, medium_confidence_vir_clasp)
+n_distinct(all_confidence_vir_clasp$Accession)
+
+karlas_proviral <- read_csv(paste(external_directory, "Karlas_proviral_uniprot.csv", sep = ""), col_names = "Accession")
+n_distinct(karlas_proviral$Accession)
+
+proviral_vir_clasp <- all_confidence_vir_clasp %>%
+  filter(Accession %in% karlas_proviral$Accession) %>%
+  mutate(CHIKV_Effect = "Pro-Viral") %>%
+  select(-ave_spectra)
+n_distinct(proviral_vir_clasp$Accession)
+
+karlas_antiviral <- read_csv(paste(external_directory, "Karlas_antiviral_uniprot.csv", sep = ""), col_names = "Accession")
+n_distinct(karlas_antiviral$Accession)
+
+antiviral_vir_clasp <- all_confidence_vir_clasp %>%
+  filter(Accession %in% karlas_antiviral$Accession) %>%
+  mutate(CHIKV_Effect = "Anti-Viral") %>%
+  select(-ave_spectra)
+n_distinct(antiviral_vir_clasp$Accession)
+
+full_karlas <- rbind(proviral_vir_clasp, antiviral_vir_clasp)
+full_karlas <- full_karlas %>%
+  mutate(exists = "X") %>%
+  spread(condition, exists, fill = "") %>%
+  arrange(CHIKV_Effect)
+write_csv(full_karlas, path = paste(output_directory, "Sup_Table_Karlas_screen.csv", sep = ""))
+
+
+```
+
+##Overlap between plus and minus IFN
+
+```{r}
+minus_vir_clasp <- high_confidence_vir_clasp %>%
+  filter(condition %in% c("hour0_minus", "hour1_minus", "hour3_minus"))
+
+plus_vir_clasp <- high_confidence_vir_clasp %>%
+  filter(condition %in% c("hour0_plus", "hour1_plus", "hour3_plus"))
+
+minus_and_plus <- minus_vir_clasp %>%
+  filter(Accession %in% plus_vir_clasp$Accession)
+
+minus_only <- minus_vir_clasp %>%
+  filter(!(Accession %in% plus_vir_clasp$Accession))
+
+plus_only <- plus_vir_clasp %>%
+  filter(!(Accession %in% minus_vir_clasp$Accession))
+
+minus <- n_distinct(minus_vir_clasp$Accession)
+plus <- n_distinct(plus_vir_clasp$Accession)
+both <- n_distinct(minus_and_plus$Accession)
+minus_o <- n_distinct(minus_only$Accession)
+plus_o <- n_distinct(plus_only$Accession)
+
+
+overlap_minus_plus <- venneuler(c("Plus" = plus_o, 
+                            "Minus" = minus_o, 
+                            "Plus&Minus" = both))
+pdf(paste(output_directory, 'overlap_minus_plus.pdf', sep = ""))
+plot(overlap_minus_plus)
+dev.off()
+```
+
+##Output the minus and plus only lists for GO analysis
+
+```{r}
+write_csv(minus_only, path = paste(output_directory, "high_confidence_minus_only.csv", sep = ""))
+write_csv(plus_only, path = paste(output_directory, "high_confidence_plus_only.csv", sep = ""))
+```
+
+
+##Output the minus and plus only lists for supplementary tables
+```{r}
+n_distinct(minus_only$Accession)
+n_distinct(plus_only$Accession)
+
+minus_only_sup <- minus_only %>%
+  mutate(exists = "X") %>%
+  select(-ave_spectra) %>%
+  spread(condition, exists, fill = "")
+
+plus_only_sup <- plus_only %>%
+  mutate(exists = "X") %>%
+  select(-ave_spectra) %>%
+  spread(condition, exists, fill = "")
+
+write_csv(minus_only_sup, path = paste(output_directory, "Sup_Table_minus_only.csv", sep = ""))
+write_csv(plus_only_sup, path = paste(output_directory, "Sup_Table_plus_only.csv", sep = ""))
+```
+
